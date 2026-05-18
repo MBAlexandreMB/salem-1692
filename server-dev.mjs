@@ -5,10 +5,23 @@
  */
 
 import http from "http";
+import { createReadStream, existsSync } from "fs";
+import { resolve, extname } from "path";
 import { WebSocketServer, WebSocket } from "ws";
 import { URL } from "url";
 
-const PORT = 1999;
+const DIST = resolve("dist");
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
+
+const PORT = process.env.PORT || 1999;
 
 // Room state — one per room ID
 const rooms = new Map();
@@ -65,8 +78,26 @@ function checkAllHolding(room) {
 }
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Salem 1692 dev server");
+  // Em dev, o Vite serve o frontend em :5173. Aqui só servimos em produção (dist/ existe).
+  if (!existsSync(DIST)) {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Salem 1692 — frontend em :5173");
+    return;
+  }
+
+  let urlPath = (req.url ?? "/").split("?")[0];
+  if (urlPath === "/" || !extname(urlPath)) urlPath = "/index.html";
+
+  const filePath = resolve(DIST, "." + urlPath);
+  if (!filePath.startsWith(DIST)) { res.writeHead(403); res.end(); return; }
+
+  if (existsSync(filePath)) {
+    res.writeHead(200, { "Content-Type": MIME[extname(filePath)] ?? "application/octet-stream" });
+    createReadStream(filePath).pipe(res);
+  } else {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    createReadStream(resolve(DIST, "index.html")).pipe(res);
+  }
 });
 
 const wss = new WebSocketServer({ server });

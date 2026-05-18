@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node server-dev.mjs\" \"vite --host\"",
+    "start": "node server-dev.mjs",
     "build": "vite build",
-    "deploy": "partykit deploy",
     "preview": "vite preview"
   },
   "dependencies": {
