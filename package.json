@@ -1,0 +1,30 @@
+{
+  "name": "salem-1692",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"node server-dev.mjs\" \"vite --host\"",
+    "build": "vite build",
+    "deploy": "partykit deploy",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "partysocket": "^1.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.6",
+    "@types/react": "^18.3.20",
+    "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "partykit": "^0.0.109",
+    "tailwindcss": "^4.1.6",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "ws": "^8.20.1"
+  }
+}
