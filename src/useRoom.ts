@@ -11,7 +11,7 @@ function getRoomId(): string {
 
 const PARTYKIT_HOST = import.meta.env.DEV
   ? `${window.location.hostname}:1999`
-  : import.meta.env.VITE_PARTYKIT_HOST ?? "salem-1692.alexandrembonomi.partykit.dev";
+  : import.meta.env.VITE_PARTYKIT_HOST ?? "salem-1692.mbalexandremb.partykit.dev";
 
 export function useRoom() {
   const [state, setState] = useState<GameState | null>(null);
