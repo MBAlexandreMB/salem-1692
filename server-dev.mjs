@@ -31,7 +31,8 @@ function createRoomState() {
     phase: "setup",
     playerNames: [],
     selectedVictim: null,
-    holdingCount: 0,
+    policeTarget: null,
+    adminId: null,
     totalConnected: 0,
   };
 }
@@ -50,30 +51,21 @@ function getRoom(roomId) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
       state: createRoomState(),
-      connections: new Map(), // connId -> { ws, holding: bool }
+      connections: new Map(), // connId -> ws
       nextId: 0,
     });
   }
   return rooms.get(roomId);
 }
 
-function broadcastState(room) {
-  const state = {
-    ...room.state,
-    holdingCount: [...room.connections.values()].filter((c) => c.holding).length,
-    totalConnected: room.connections.size,
-  };
-  const msg = JSON.stringify({ type: "state", state });
-  for (const { ws } of room.connections.values()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-  }
+function roomState(room) {
+  return { ...room.state, totalConnected: room.connections.size };
 }
 
-function checkAllHolding(room) {
-  const total = room.connections.size;
-  const holding = [...room.connections.values()].filter((c) => c.holding).length;
-  if (room.state.phase === "holding" && total > 0 && holding >= total) {
-    room.state.phase = "revealed";
+function broadcastState(room) {
+  const msg = JSON.stringify({ type: "state", state: roomState(room) });
+  for (const ws of room.connections.values()) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
 
@@ -107,15 +99,11 @@ wss.on("connection", (ws, req) => {
   const room = getRoom(roomId);
   const connId = String(room.nextId++);
 
-  room.connections.set(connId, { ws, holding: false });
+  room.connections.set(connId, ws);
 
-  // Send current state to new connection
-  const initialState = {
-    ...room.state,
-    holdingCount: [...room.connections.values()].filter((c) => c.holding).length,
-    totalConnected: room.connections.size,
-  };
-  ws.send(JSON.stringify({ type: "state", state: initialState }));
+  // Tell the connection who it is, then send current state
+  ws.send(JSON.stringify({ type: "identity", id: connId }));
+  ws.send(JSON.stringify({ type: "state", state: roomState(room) }));
 
   // Notify others of new connection
   broadcastState(room);
@@ -129,14 +117,17 @@ wss.on("connection", (ws, req) => {
     }
 
     const s = room.state;
-    const conn = room.connections.get(connId);
+    const isAdmin = s.adminId !== null && s.adminId === connId;
 
     switch (msg.type) {
       case "set_players":
         s.playerNames = msg.names;
         break;
+      case "claim_admin":
+        s.adminId = s.adminId === connId ? null : connId;
+        break;
       case "start_night":
-        if (s.phase === "setup") s.phase = "night_start";
+        if (s.phase === "setup" && isAdmin) s.phase = "night_start";
         break;
       case "begin_selection":
         if (s.phase === "night_start") s.phase = "selection";
@@ -147,33 +138,45 @@ wss.on("connection", (ws, req) => {
           s.phase = "pending";
         }
         break;
+      case "select_police":
+        if (s.phase === "police_selection") {
+          s.policeTarget = msg.name;
+          s.phase = "police_pending";
+        }
+        break;
       case "cancel":
         if (s.phase === "pending") {
           s.selectedVictim = null;
           s.phase = "selection";
+        } else if (s.phase === "police_pending") {
+          s.policeTarget = null;
+          s.phase = "police_selection";
         }
         break;
       case "confirm":
-        if (s.phase === "pending") {
-          for (const c of room.connections.values()) c.holding = false;
-          s.phase = "holding";
-        }
+        if (s.phase === "pending") s.phase = "police_selection";
+        else if (s.phase === "police_pending") s.phase = "holding";
         break;
-      case "hold_start":
-        if (s.phase === "holding" && conn) {
-          conn.holding = true;
-          checkAllHolding(room);
-        }
+      case "reveal":
+        if (s.phase === "holding" && isAdmin) s.phase = "saved";
         break;
-      case "hold_end":
-        if (conn) conn.holding = false;
+      case "show_victim":
+        if (s.phase === "saved" && isAdmin) s.phase = "revealed";
         break;
       case "next_night":
         if (s.phase === "revealed") {
           s.selectedVictim = null;
-          for (const c of room.connections.values()) c.holding = false;
+          s.policeTarget = null;
           s.phase = "night_start";
         }
+        break;
+      case "reset":
+        if (!isAdmin) break;
+        s.playerNames = [];
+        s.selectedVictim = null;
+        s.policeTarget = null;
+        s.adminId = null;
+        s.phase = "setup";
         break;
     }
 
@@ -182,7 +185,7 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     room.connections.delete(connId);
-    if (room.state.phase === "holding") checkAllHolding(room);
+    if (room.state.adminId === connId) room.state.adminId = null;
     broadcastState(room);
     if (room.connections.size === 0) rooms.delete(roomId);
   });

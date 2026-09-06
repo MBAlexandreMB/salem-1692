@@ -5,7 +5,8 @@ export default class SalemServer implements Party.Server {
   private playerNames: string[] = [];
   private phase: Phase = "setup";
   private selectedVictim: string | null = null;
-  private holdingSet = new Set<string>();
+  private policeTarget: string | null = null;
+  private adminId: string | null = null;
 
   constructor(readonly room: Party.Room) {}
 
@@ -14,9 +15,14 @@ export default class SalemServer implements Party.Server {
       phase: this.phase,
       playerNames: this.playerNames,
       selectedVictim: this.selectedVictim,
-      holdingCount: this.holdingSet.size,
+      policeTarget: this.policeTarget,
+      adminId: this.adminId,
       totalConnected: [...this.room.getConnections()].length,
     };
+  }
+
+  private isAdmin(conn: Party.Connection) {
+    return this.adminId !== null && this.adminId === conn.id;
   }
 
   private broadcast() {
@@ -24,13 +30,13 @@ export default class SalemServer implements Party.Server {
   }
 
   onConnect(conn: Party.Connection) {
+    conn.send(JSON.stringify({ type: "identity", id: conn.id }));
     conn.send(JSON.stringify({ type: "state", state: this.state }));
     this.broadcast();
   }
 
   onClose(conn: Party.Connection) {
-    this.holdingSet.delete(conn.id);
-    this.checkAllHolding();
+    if (this.adminId === conn.id) this.adminId = null;
     this.broadcast();
   }
 
@@ -42,8 +48,12 @@ export default class SalemServer implements Party.Server {
         this.playerNames = msg.names;
         break;
 
+      case "claim_admin":
+        this.adminId = this.adminId === sender.id ? null : sender.id;
+        break;
+
       case "start_night":
-        if (this.phase === "setup") this.phase = "night_start";
+        if (this.phase === "setup" && this.isAdmin(sender)) this.phase = "night_start";
         break;
 
       case "begin_selection":
@@ -57,48 +67,55 @@ export default class SalemServer implements Party.Server {
         }
         break;
 
+      case "select_police":
+        if (this.phase === "police_selection") {
+          this.policeTarget = msg.name;
+          this.phase = "police_pending";
+        }
+        break;
+
       case "cancel":
         if (this.phase === "pending") {
           this.selectedVictim = null;
           this.phase = "selection";
+        } else if (this.phase === "police_pending") {
+          this.policeTarget = null;
+          this.phase = "police_selection";
         }
         break;
 
       case "confirm":
-        if (this.phase === "pending") {
-          this.holdingSet.clear();
-          this.phase = "holding";
-        }
+        if (this.phase === "pending") this.phase = "police_selection";
+        else if (this.phase === "police_pending") this.phase = "holding";
         break;
 
-      case "hold_start":
-        if (this.phase === "holding") {
-          this.holdingSet.add(sender.id);
-          this.checkAllHolding();
-        }
+      case "reveal":
+        if (this.phase === "holding" && this.isAdmin(sender)) this.phase = "saved";
         break;
 
-      case "hold_end":
-        this.holdingSet.delete(sender.id);
+      case "show_victim":
+        if (this.phase === "saved" && this.isAdmin(sender)) this.phase = "revealed";
         break;
 
       case "next_night":
         if (this.phase === "revealed") {
           this.selectedVictim = null;
-          this.holdingSet.clear();
+          this.policeTarget = null;
           this.phase = "night_start";
         }
+        break;
+
+      case "reset":
+        if (!this.isAdmin(sender)) break;
+        this.playerNames = [];
+        this.selectedVictim = null;
+        this.policeTarget = null;
+        this.adminId = null;
+        this.phase = "setup";
         break;
     }
 
     this.broadcast();
-  }
-
-  private checkAllHolding() {
-    const total = [...this.room.getConnections()].length;
-    if (this.phase === "holding" && total > 0 && this.holdingSet.size >= total) {
-      this.phase = "revealed";
-    }
   }
 
   onRequest(req: Party.Request): Response | Promise<Response> {

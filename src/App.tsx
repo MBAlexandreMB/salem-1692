@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRoom } from "./useRoom";
 
 export default function App() {
-  const { state, send, roomId } = useRoom();
+  const { state, send, roomId, isAdmin } = useRoom();
 
   if (!state) {
     return (
@@ -14,20 +14,78 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {state.phase === "setup" && <SetupScreen names={state.playerNames} roomId={roomId} onSetNames={(names) => send({ type: "set_players", names })} onStart={() => send({ type: "start_night" })} />}
+      {state.phase === "setup" && <SetupScreen names={state.playerNames} roomId={roomId} isAdmin={isAdmin} hasAdmin={state.adminId !== null} onSetNames={(names) => send({ type: "set_players", names })} onClaimAdmin={() => send({ type: "claim_admin" })} onStart={() => send({ type: "start_night" })} />}
       {state.phase === "night_start" && <NightStartScreen onTouch={() => send({ type: "begin_selection" })} />}
-      {state.phase === "selection" && <SelectionScreen names={state.playerNames} onSelect={(name) => send({ type: "select_victim", name })} />}
-      {state.phase === "pending" && <PendingScreen victim={state.selectedVictim!} onCancel={() => send({ type: "cancel" })} onConfirm={() => send({ type: "confirm" })} />}
-      {state.phase === "holding" && <HoldingScreen holdingCount={state.holdingCount} total={state.totalConnected} onHoldStart={() => send({ type: "hold_start" })} onHoldEnd={() => send({ type: "hold_end" })} />}
-      {state.phase === "revealed" && <RevealedScreen victim={state.selectedVictim!} onNext={() => send({ type: "next_night" })} />}
+      {state.phase === "selection" && <SelectionScreen title="Escolha a vítima" names={state.playerNames} onSelect={(name) => send({ type: "select_victim", name })} />}
+      {state.phase === "pending" && <PendingScreen title="Vítima escolhida" name={state.selectedVictim!} onCancel={() => send({ type: "cancel" })} onConfirm={() => send({ type: "confirm" })} />}
+      {state.phase === "police_selection" && <SelectionScreen title="Policial · escolha quem proteger" names={state.playerNames} onSelect={(name) => send({ type: "select_police", name })} />}
+      {state.phase === "police_pending" && <PendingScreen title="O policial protege" name={state.policeTarget!} onCancel={() => send({ type: "cancel" })} onConfirm={() => send({ type: "confirm" })} />}
+      {state.phase === "holding" && <HoldingScreen canReveal={isAdmin} onReveal={() => send({ type: "reveal" })} />}
+      {state.phase === "saved" && <SavedScreen protectedName={state.policeTarget!} isAdmin={isAdmin} onContinue={() => send({ type: "show_victim" })} />}
+      {state.phase === "revealed" && <RevealedScreen victim={state.selectedVictim!} survived={state.selectedVictim === state.policeTarget} onNext={() => send({ type: "next_night" })} />}
+
+      {state.phase !== "setup" && isAdmin && <ResetButton onReset={() => send({ type: "reset" })} />}
+      {state.phase !== "setup" && state.adminId === null && (
+        <button
+          className="fixed top-4 right-4 z-50 px-3 py-2 rounded-lg bg-amber-950 border border-amber-800 text-amber-200 text-sm active:bg-amber-900"
+          onClick={() => send({ type: "claim_admin" })}
+        >
+          Sala sem admin · assumir
+        </button>
+      )}
     </div>
   );
 }
 
-function SetupScreen({ names, roomId, onSetNames, onStart }: {
+function ResetButton({ onReset }: { onReset: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+
+  if (!confirming) {
+    return (
+      <button
+        className="fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-stone-900/80 border border-stone-800 text-stone-500 text-sm active:bg-stone-800"
+        aria-label="Reiniciar"
+        onClick={() => setConfirming(true)}
+      >
+        ⟲
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+      <button
+        className="px-3 py-2 rounded-lg bg-stone-900/90 border border-stone-800 text-stone-400 text-sm active:bg-stone-800"
+        onClick={() => setConfirming(false)}
+      >
+        Cancelar
+      </button>
+      <button
+        className="px-3 py-2 rounded-lg bg-red-950 border border-red-900 text-red-300 text-sm font-medium active:bg-red-900"
+        onClick={() => {
+          setConfirming(false);
+          onReset();
+        }}
+      >
+        Reiniciar tudo
+      </button>
+    </div>
+  );
+}
+
+function SetupScreen({ names, roomId, isAdmin, hasAdmin, onSetNames, onClaimAdmin, onStart }: {
   names: string[];
   roomId: string;
+  isAdmin: boolean;
+  hasAdmin: boolean;
   onSetNames: (names: string[]) => void;
+  onClaimAdmin: () => void;
   onStart: () => void;
 }) {
   const [input, setInput] = useState("");
@@ -80,12 +138,36 @@ function SetupScreen({ names, roomId, onSetNames, onStart }: {
       <div className="flex-1" />
 
       <button
-        disabled={names.length < 2}
-        className="w-full py-4 rounded-xl text-lg font-semibold bg-amber-900 text-amber-100 disabled:opacity-30 active:bg-amber-800"
-        onClick={onStart}
+        className={
+          isAdmin
+            ? "w-full py-4 rounded-xl text-base font-medium bg-amber-950 text-amber-200 border border-amber-800 active:bg-amber-900"
+            : "w-full py-4 rounded-xl text-base font-medium bg-stone-900 text-stone-400 border border-stone-800 active:bg-stone-800"
+        }
+        onClick={onClaimAdmin}
       >
-        Começar a noite
+        {isAdmin
+          ? "Você é o admin · toque para liberar"
+          : hasAdmin
+            ? "Outro jogador é o admin · toque para assumir"
+            : "Sou o admin"}
       </button>
+      <p className="text-stone-600 text-xs -mt-3">
+        O admin é quem revela a vítima no fim da noite.
+      </p>
+
+      {isAdmin ? (
+        <button
+          disabled={names.length < 2}
+          className="w-full py-4 rounded-xl text-lg font-semibold bg-amber-900 text-amber-100 disabled:opacity-30 active:bg-amber-800"
+          onClick={onStart}
+        >
+          Começar a noite
+        </button>
+      ) : (
+        <p className="w-full py-4 text-center text-stone-600 text-sm">
+          {hasAdmin ? "Aguardando o admin começar a noite" : "Escolham um admin para começar"}
+        </p>
+      )}
     </div>
   );
 }
@@ -103,10 +185,10 @@ function NightStartScreen({ onTouch }: { onTouch: () => void }) {
   );
 }
 
-function SelectionScreen({ names, onSelect }: { names: string[]; onSelect: (name: string) => void }) {
+function SelectionScreen({ title, names, onSelect }: { title: string; names: string[]; onSelect: (name: string) => void }) {
   return (
     <div className="min-h-screen flex flex-col p-6 gap-4">
-      <p className="text-stone-600 text-xs text-center uppercase tracking-widest mt-2">Escolha a vítima</p>
+      <p className="text-stone-600 text-xs text-center uppercase tracking-widest mt-2">{title}</p>
       <div className="flex flex-col gap-3 mt-4">
         {names.map((name) => (
           <button
@@ -122,11 +204,11 @@ function SelectionScreen({ names, onSelect }: { names: string[]; onSelect: (name
   );
 }
 
-function PendingScreen({ victim, onCancel, onConfirm }: { victim: string; onCancel: () => void; onConfirm: () => void }) {
+function PendingScreen({ title, name, onCancel, onConfirm }: { title: string; name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-10 p-8">
-      <p className="text-stone-500 text-sm uppercase tracking-widest">Vítima escolhida</p>
-      <p className="text-4xl font-bold text-amber-200">{victim}</p>
+      <p className="text-stone-500 text-sm uppercase tracking-widest">{title}</p>
+      <p className="text-4xl font-bold text-amber-200">{name}</p>
       <div className="flex w-full gap-4 mt-4">
         <button
           className="flex-1 py-5 rounded-xl text-lg font-medium bg-stone-900 text-stone-400 active:bg-stone-800 border border-stone-800"
@@ -145,37 +227,53 @@ function PendingScreen({ victim, onCancel, onConfirm }: { victim: string; onCanc
   );
 }
 
-function HoldingScreen({ holdingCount, total, onHoldStart, onHoldEnd }: {
-  holdingCount: number;
-  total: number;
-  onHoldStart: () => void;
-  onHoldEnd: () => void;
-}) {
-  const holding = useRef(false);
+const HOLD_MS = 1200;
+
+function HoldingScreen({ canReveal, onReveal }: { canReveal: boolean; onReveal: () => void }) {
+  const [progress, setProgress] = useState(0);
+  const frameRef = useRef<number | null>(null);
 
   function handleStart() {
-    if (holding.current) return;
-    holding.current = true;
-    onHoldStart();
-    if (navigator.vibrate) navigator.vibrate(40);
+    if (!canReveal || frameRef.current !== null) return;
+    const startedAt = Date.now();
+
+    const tick = () => {
+      const value = Math.min((Date.now() - startedAt) / HOLD_MS, 1);
+      setProgress(value);
+      if (value >= 1) {
+        frameRef.current = null;
+        if (navigator.vibrate) navigator.vibrate(40);
+        onReveal();
+        return;
+      }
+      frameRef.current = requestAnimationFrame(tick);
+    };
+
+    frameRef.current = requestAnimationFrame(tick);
   }
 
   function handleEnd() {
-    if (!holding.current) return;
-    holding.current = false;
-    onHoldEnd();
+    if (frameRef.current === null) return;
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    setProgress(0);
   }
 
   useEffect(() => {
     return () => {
-      if (holding.current) {
-        holding.current = false;
-        onHoldEnd();
-      }
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     };
   }, []);
 
-  const progress = total > 0 ? holdingCount / total : 0;
+  if (!canReveal) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center gap-6 bg-black select-none">
+        <p className="text-4xl">🕯️</p>
+        <p className="text-stone-400 text-lg tracking-wide">Aguardando o admin</p>
+        <p className="text-stone-600 text-sm">só o admin revela a vítima</p>
+      </div>
+    );
+  }
 
   return (
     <button
@@ -200,17 +298,43 @@ function HoldingScreen({ holdingCount, total, onHoldStart, onHoldEnd }: {
             strokeLinecap="round"
           />
         </svg>
-        <span className="text-stone-300 text-2xl font-bold z-10">{holdingCount}/{total}</span>
+        <span className="text-stone-500 text-3xl z-10">🌙</span>
       </div>
     </button>
   );
 }
 
-function RevealedScreen({ victim, onNext }: { victim: string; onNext: () => void }) {
+function SavedScreen({ protectedName, isAdmin, onContinue }: {
+  protectedName: string;
+  isAdmin: boolean;
+  onContinue: () => void;
+}) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-10 p-8">
-      <p className="text-stone-500 text-sm uppercase tracking-widest">Esta noite cai</p>
-      <p className="text-5xl font-bold text-red-400">{victim}</p>
+      <p className="text-stone-500 text-sm uppercase tracking-widest">O policial protegeu</p>
+      <p className="text-4xl font-bold text-sky-300">{protectedName}</p>
+      {isAdmin ? (
+        <button
+          className="mt-8 w-full py-4 rounded-xl text-base font-medium bg-stone-900 text-stone-300 active:bg-stone-800 border border-stone-800"
+          onClick={onContinue}
+        >
+          Continuar
+        </button>
+      ) : (
+        <p className="mt-8 text-stone-600 text-sm">aguardando o admin</p>
+      )}
+    </div>
+  );
+}
+
+function RevealedScreen({ victim, survived, onNext }: { victim: string; survived: boolean; onNext: () => void }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-10 p-8">
+      <p className="text-stone-500 text-sm uppercase tracking-widest">
+        {survived ? "As bruxas tentaram matar" : "Esta noite cai"}
+      </p>
+      <p className={survived ? "text-5xl font-bold text-sky-300" : "text-5xl font-bold text-red-400"}>{victim}</p>
+      {survived && <p className="-mt-6 text-stone-500 text-sm">protegido pelo policial · sobreviveu</p>}
       <button
         className="mt-8 w-full py-4 rounded-xl text-base font-medium bg-stone-900 text-stone-500 active:bg-stone-800 border border-stone-800"
         onClick={onNext}

@@ -15,6 +15,7 @@ const PARTYKIT_HOST = import.meta.env.DEV
 
 export function useRoom() {
   const [state, setState] = useState<GameState | null>(null);
+  const [selfId, setSelfId] = useState<string | null>(null);
   const socketRef = useRef<PartySocket | null>(null);
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export function useRoom() {
     socket.onmessage = (event) => {
       const msg = JSON.parse(event.data as string);
       if (msg.type === "state") setState(msg.state as GameState);
+      if (msg.type === "identity") setSelfId(msg.id as string);
     };
 
     return () => socket.close();
@@ -37,5 +39,7 @@ export function useRoom() {
     socketRef.current?.send(JSON.stringify(msg));
   }
 
-  return { state, send, roomId: getRoomId() };
+  const isAdmin = state != null && selfId != null && state.adminId === selfId;
+
+  return { state, send, roomId: getRoomId(), isAdmin };
 }
